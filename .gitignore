@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Task prompt and device logs (not part of the plugin)
+PROMPT.md
+boot.log
+
+# Source material (processed into esp32c3_rom_symbols.json)
+esp32c3.rom.ld
+esp32c3.rom.api.ld
+esp32c3.rom.eco3.ld
