@@ -8,7 +8,9 @@
    "api": [
       "python3"
    ],
+   "projectUrl": "https://github.com/psifertex/bnesp32",
    "description": "ESP32-series firmware image loader for Binary Ninja",
+   "dependencies": {},
    "longdescription": "Loads ESP32-series firmware images built with ESP-IDF/PlatformIO. Auto-detects chip variant (ESP32, ESP32-S2, ESP32-S3, ESP32-C2, ESP32-C3, ESP32-C5, ESP32-C6, ESP32-H2, ESP32-P4), creates segments at correct memory addresses, and optionally loads ROM function symbols. RISC-V variants use the built-in rv32gc architecture; Xtensa variants require a third-party architecture plugin.",
    "license": {
       "name": "MIT",
