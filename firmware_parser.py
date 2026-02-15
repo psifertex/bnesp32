@@ -1,73 +1,40 @@
 """
-ESP32-C3 firmware image parser.
+ESP32 firmware image parser.
 
-Parses the ESP-IDF extended header format used by ESP32-series chips.
-The ESP32-C3 uses a 24-byte header (8 common + 16 extended) followed by
-segments, a checksum byte, and an optional SHA256 hash.
+Parses the ESP-IDF extended header format used by all ESP32-series chips.
+The header is 24 bytes (8 common + 16 extended) followed by segments,
+a checksum byte, and an optional SHA256 hash.
 """
 import struct
 
-
-# ESP32-C3 memory regions
-MEMORY_REGIONS = {
-    'DROM':  (0x3C000000, 0x3C800000),  # Flash-mapped read-only data
-    'DRAM':  (0x3FC80000, 0x3FCE0000),  # Internal data RAM
-    'ROM':   (0x40000000, 0x40060000),  # Internal mask ROM
-    'IRAM':  (0x4037C000, 0x403E0000),  # Internal instruction RAM
-    'IROM':  (0x42000000, 0x42800000),  # Flash-mapped code
-    'RTC':   (0x50000000, 0x50002000),  # RTC FAST memory
-}
+try:
+    from .chips import CHIPS, is_code_region, is_writable_region
+except ImportError:
+    from chips import CHIPS, is_code_region, is_writable_region
 
 
-def classify_address(addr):
-    """Classify a memory address into its ESP32-C3 memory region."""
-    for name, (start, end) in MEMORY_REGIONS.items():
-        if start <= addr < end:
-            return name
-    return 'UNKNOWN'
-
-
-def is_code_region(region):
-    """Return True if the region contains executable code."""
-    return region in ('IRAM', 'IROM', 'ROM')
-
-
-def is_writable_region(region):
-    """Return True if the region is writable."""
-    return region in ('DRAM', 'RTC')
-
-
-class ESP32C3Segment:
-    """A single loadable segment from an ESP32-C3 firmware image."""
+class ESPSegment:
+    """A single loadable segment from an ESP32 firmware image."""
 
     HEADER_FMT = '<II'
     HEADER_SIZE = struct.calcsize(HEADER_FMT)  # 8 bytes
 
-    def __init__(self, load_address, size, file_offset):
+    def __init__(self, load_address, size, file_offset, region):
         self.load_address = load_address
         self.size = size
         self.file_offset = file_offset  # offset of segment DATA in file
-
-    @property
-    def region(self):
-        return classify_address(self.load_address)
-
-    @property
-    def is_code(self):
-        return is_code_region(self.region)
-
-    @property
-    def is_writable(self):
-        return is_writable_region(self.region)
+        self.region = region
+        self.is_code = is_code_region(region)
+        self.is_writable = is_writable_region(region)
 
     def __repr__(self):
-        return (f"ESP32C3Segment(addr=0x{self.load_address:08x}, "
+        return (f"ESPSegment(addr=0x{self.load_address:08x}, "
                 f"size=0x{self.size:x}, offset=0x{self.file_offset:x}, "
                 f"region={self.region})")
 
 
-class ESP32C3Image:
-    """Parsed ESP32-C3 firmware image."""
+class ESPImage:
+    """Parsed ESP32 firmware image (any chip variant)."""
 
     COMMON_HEADER_FMT = '<BBBBI'
     COMMON_HEADER_SIZE = struct.calcsize(COMMON_HEADER_FMT)  # 8 bytes
@@ -75,7 +42,6 @@ class ESP32C3Image:
     TOTAL_HEADER_SIZE = COMMON_HEADER_SIZE + EXTENDED_HEADER_SIZE  # 24
 
     ESP_IMAGE_MAGIC = 0xE9
-    ESP32C3_CHIP_ID = 0x0005
 
     def __init__(self):
         # Common header
@@ -94,6 +60,7 @@ class ESP32C3Image:
         # Parsed data
         self._segments = []
         self.image_size = 0
+        self.chip_def = None
 
     @property
     def segments(self):
@@ -101,7 +68,7 @@ class ESP32C3Image:
 
     @classmethod
     def from_binary_view(cls, bv):
-        """Parse an ESP32-C3 image from a Binary Ninja BinaryView."""
+        """Parse an ESP32 image from a Binary Ninja BinaryView."""
         header_data = bv.read(0, cls.TOTAL_HEADER_SIZE)
         if len(header_data) < cls.TOTAL_HEADER_SIZE:
             return None
@@ -109,7 +76,7 @@ class ESP32C3Image:
 
     @classmethod
     def from_bytes(cls, data):
-        """Parse an ESP32-C3 image from raw bytes."""
+        """Parse an ESP32 image from raw bytes."""
         if len(data) < cls.TOTAL_HEADER_SIZE:
             return None
         return cls._parse(data[:cls.TOTAL_HEADER_SIZE],
@@ -135,18 +102,22 @@ class ESP32C3Image:
         img.max_rev_full = struct.unpack_from('<H', header_data, 0x11)[0]
         img.append_digest = header_data[0x17]
 
-        if img.chip_id != cls.ESP32C3_CHIP_ID:
+        # Look up chip definition
+        chip_def = CHIPS.get(img.chip_id)
+        if chip_def is None:
             return None
+        img.chip_def = chip_def
 
         # Parse segments
         offset = cls.TOTAL_HEADER_SIZE
         for _ in range(img.segment_count):
-            seg_header = read_fn(offset, ESP32C3Segment.HEADER_SIZE)
-            if len(seg_header) < ESP32C3Segment.HEADER_SIZE:
+            seg_header = read_fn(offset, ESPSegment.HEADER_SIZE)
+            if len(seg_header) < ESPSegment.HEADER_SIZE:
                 return None
-            load_addr, size = struct.unpack(ESP32C3Segment.HEADER_FMT, seg_header)
-            data_offset = offset + ESP32C3Segment.HEADER_SIZE
-            img._segments.append(ESP32C3Segment(load_addr, size, data_offset))
+            load_addr, size = struct.unpack(ESPSegment.HEADER_FMT, seg_header)
+            data_offset = offset + ESPSegment.HEADER_SIZE
+            region = chip_def.classify_address(load_addr)
+            img._segments.append(ESPSegment(load_addr, size, data_offset, region))
             offset = data_offset + size
 
         # Checksum is at next 16-byte aligned position
@@ -160,6 +131,6 @@ class ESP32C3Image:
         return img
 
 
-def parse_esp32c3(bv):
-    """Parse an ESP32-C3 firmware image from a BinaryView. Returns ESP32C3Image or None."""
-    return ESP32C3Image.from_binary_view(bv)
+def parse_esp32(bv):
+    """Parse an ESP32 firmware image from a BinaryView. Returns ESPImage or None."""
+    return ESPImage.from_binary_view(bv)

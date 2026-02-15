@@ -1,5 +1,5 @@
 try:
-    from .binaryview import ESP32C3Firmware
-    ESP32C3Firmware.register()
+    from .binaryview import ESPFirmware
+    ESPFirmware.register()
 except ImportError:
     pass

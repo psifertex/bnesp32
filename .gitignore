@@ -6,6 +6,9 @@ __pycache__/
 PROMPT.md
 boot.log
 
+# Test firmware binaries (downloaded, not committed)
+tests/firmware/
+
 # Source material (processed into esp32c3_rom_symbols.json)
 esp32c3.rom.ld
 esp32c3.rom.api.ld
